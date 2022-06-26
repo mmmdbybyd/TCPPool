@@ -40,7 +40,7 @@ func (pool *Pool) Start() {
 		if pool.connsChannel != nil {
 			close(pool.connsChannel)
 		}
-		pool.connsChannel = make(chan *idleConn, pool.MaxConn)
+		pool.connsChannel = make(chan *idleConn, pool.MaxConn<<1)
 		pool.idleTime = time.Duration(pool.IdleSec) * time.Second
 		go pool.GenerateConnections()
 	}
@@ -79,6 +79,7 @@ func (pool *Pool) GenerateConnections() {
 
 	pool.mutex.Lock()
 	if pool.isRelease {
+		pool.mutex.Unlock()
 		return
 	}
 	dialSpeed := pool.DialSpeed
@@ -98,6 +99,7 @@ func (pool *Pool) GenerateConnections() {
 				if !pool.Put(conn) {
 					return
 				}
+				openingConns++
 			}
 			time.Sleep(time.Second)
 		}
@@ -107,6 +109,7 @@ func (pool *Pool) GenerateConnections() {
 			if !pool.Put(conn) {
 				return
 			}
+			openingConns++
 		}
 	}
 }
@@ -121,6 +124,9 @@ READ_CONN_CHANNEL:
 	case iConn = <-pool.connsChannel:
 		pool.openingConns--
 		if pool.openingConns <= pool.MinConn { //连接池达到最小连接数，生成新的连接
+			if pool.openingConns < 0 {
+				pool.openingConns = 0
+			}
 			go pool.GenerateConnections()
 		}
 		if pool.idleTime > 0 && iConn.createdTime.Add(pool.idleTime).Before(time.Now()) { //超时则关闭连接重新读取新的连接
