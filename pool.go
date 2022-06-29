@@ -158,14 +158,18 @@ func (pool *Pool) Put(conn net.Conn) bool {
 		pool.mutex.Unlock()
 		return false
 	}
-	pool.connsChannel <- &idleConn{
+	select {
+	case pool.connsChannel <- &idleConn{
 		Conn:        conn,
 		createdTime: time.Now(),
+	}:
+		pool.openingConns++
+		pool.mutex.Unlock()
+		return true
+	default:
+		pool.mutex.Unlock()
+		return false
 	}
-	pool.openingConns++
-	pool.mutex.Unlock()
-
-	return true
 }
 
 // Release 释放连接池中所有连接
