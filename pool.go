@@ -1,6 +1,7 @@
 package TCPPool
 
 import (
+	"errors"
 	"net"
 	"sync"
 	"time"
@@ -33,13 +34,14 @@ type Pool struct {
 	mutex        sync.Mutex
 }
 
+var (
+	errorIsReleased error = errors.New("pool is released")
+)
+
 // Start 启动TCP连接池
 func (pool *Pool) Start() {
 	pool.isRelease = false
 	if pool.MaxConn > 0 {
-		if pool.connsChannel != nil {
-			close(pool.connsChannel)
-		}
 		pool.connsChannel = make(chan *idleConn, pool.MaxConn<<1)
 		pool.idleTime = time.Duration(pool.IdleSec) * time.Second
 		go pool.GenerateConnections()
@@ -119,6 +121,10 @@ func (pool *Pool) Get() (conn net.Conn, err error) {
 	var iConn *idleConn
 
 	pool.mutex.Lock()
+	if pool.isRelease {
+		pool.mutex.Unlock()
+		return nil, errorIsReleased
+	}
 READ_CONN_CHANNEL:
 	select {
 	case iConn = <-pool.connsChannel:
@@ -175,6 +181,10 @@ func (pool *Pool) Put(conn net.Conn) bool {
 // Release 释放连接池中所有连接
 func (pool *Pool) Release() {
 	pool.mutex.Lock()
+	if pool.isRelease {
+		pool.mutex.Unlock()
+		return
+	}
 	for {
 		select {
 		case iConn := <-pool.connsChannel:
@@ -185,7 +195,8 @@ func (pool *Pool) Release() {
 		}
 	}
 CLOSE_END:
-	// close(pool.connsChannel)
+	close(pool.connsChannel)
+	pool.isRelease = true
 	pool.mutex.Unlock()
 }
 
